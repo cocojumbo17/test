@@ -27,7 +27,11 @@ public class ShellMain {
         try {
             System.out.println("ShellMain uid=" + android.os.Process.myUid());
             Context ctx = new ShellContext(systemContext());
-            new Probe(ctx, s -> System.out.println(s)).run();
+            if (args.length > 0 && args[0].equals("temps")) {
+                new TempProbe(ctx, s -> System.out.println(s)).run();
+            } else {
+                new Probe(ctx, s -> System.out.println(s)).run();
+            }
         } catch (Throwable t) {
             System.out.println("ShellMain failed: " + t);
             t.printStackTrace(System.out);

@@ -52,7 +52,9 @@ public class AdbProbe {
         }
         if (adb == null) {
             out.line("");
-            out.line("Could not connect to ADB. / Не вдалося під'єднатися до ADB.");
+            out.line("No authorized ADB session (see errors above).");
+            out.line("\"Read timed out\" after the confirm prompt = connected, but the key was not approved.");
+            out.line("\"Connection refused\" = ADB is not listening on that port.");
             out.line("=== DONE ===");
             return;
         }

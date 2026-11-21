@@ -3,8 +3,8 @@ plugins {
 }
 
 // Change the version here only: it goes into the app and into the APK file name.
-def appVersionName = '0.6'
-def appVersionCode = 6
+def appVersionName = '0.7'
+def appVersionCode = 7
 
 base {
     archivesName = "BydProbe-v${appVersionName}"

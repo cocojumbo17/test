@@ -47,7 +47,7 @@ public class TempProbe {
     }
 
     public void run() {
-        out.line("=== BYD TempProbe 0.6 ===");
+        out.line("=== BYD TempProbe 0.7 ===");
         Object ac = device("android.hardware.bydauto.ac.BYDAutoAcDevice");
         Object ins = device("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
         Object sen = device("android.hardware.bydauto.sensor.BYDAutoSensorDevice");
@@ -66,38 +66,7 @@ public class TempProbe {
             if (round < 3) sleep(3000);
         }
 
-        out.line("");
-        out.line("=== KEY FEATURE IDS VIA get(int[], Class) ===");
-        Object[] devs = {ac, ins, sen};
-        String[] devNames = {"ac", "ins", "sen"};
-        boolean classDumped = false;
-        for (int i = 0; i < KEY_IDS.length; i++) {
-            out.line("");
-            out.line("* " + KEY_NAMES[i] + " (" + KEY_IDS[i] + ")");
-            for (int d = 0; d < devs.length; d++) {
-                if (devs[d] == null) continue;
-                for (Class<?> type : new Class<?>[]{Integer.class, Double.class}) {
-                    Object v = callRaw(devs[d], "get", new Class<?>[]{int[].class, Class.class},
-                            new int[]{KEY_IDS[i]}, type);
-                    out.line("  " + devNames[d] + "/" + type.getSimpleName() + ": " + describe(v));
-                    if (!classDumped && v != null && !(v instanceof Throwable)) {
-                        dumpClass(v.getClass());
-                        classDumped = true;
-                    }
-                }
-            }
-        }
-
-        dumpDeclared("android.hardware.bydauto.AbsBYDAutoDevice");
-        dumpDeclared("android.hardware.bydauto.ac.BYDAutoAcDevice");
-        for (String l : new String[]{
-                "android.hardware.bydauto.ac.AbsBYDAutoAcListener",
-                "android.hardware.bydauto.AbsBYDAutoListener",
-                "android.hardware.bydauto.IBYDAutoListener"}) {
-            dumpDeclared(l);
-        }
-        tryHiddenGetters(ac, "ac", 1000);
-        tryHiddenGetters(ins, "ins", 1007);
+        searchAllWithProtectedGet();
 
         out.line("");
         out.line("=== DONE ===");
@@ -115,6 +84,8 @@ public class TempProbe {
     }
 
     @SuppressWarnings("deprecation")
+    private boolean quietScan = false;
+
     private void scanConstants(List<int[]> ids, List<String> names) {
         out.line("");
         out.line("=== TEMP CONSTANTS IN ALL bydauto CLASSES ===");
@@ -136,7 +107,7 @@ public class TempProbe {
                         f.setAccessible(true);
                         int v = f.getInt(null);
                         String label = shortName(cn) + "." + f.getName();
-                        out.line(label + " = " + v);
+                        if (!quietScan) out.line(label + " = " + v);
                         // Feature ids in BYD classes are large numbers; small ones are ranges/enums.
                         if (Math.abs(v) > 1000 && v != 65535 && v > -2147480000) {
                             ids.add(new int[]{v});
@@ -229,6 +200,84 @@ public class TempProbe {
                 }
             }
         }
+    }
+
+    private static final String[][] DEVICES = {
+        // FeatureIds inner class, device class, device type
+        {"Ac", "android.hardware.bydauto.ac.BYDAutoAcDevice", "1000"},
+        {"Bodywork", "android.hardware.bydauto.bodywork.BYDAutoBodyworkDevice", "1001"},
+        {"Instrument", "android.hardware.bydauto.instrument.BYDAutoInstrumentDevice", "1007"},
+        {"Charging", "android.hardware.bydauto.charging.BYDAutoChargingDevice", "1009"},
+        {"Engine", "android.hardware.bydauto.engine.BYDAutoEngineDevice", "1012"},
+        {"Statistic", "android.hardware.bydauto.statistic.BYDAutoStatisticDevice", "1014"},
+        {"Setting", "android.hardware.bydauto.setting.BYDAutoSettingDevice", "1023"},
+        {"Sensor", "android.hardware.bydauto.sensor.BYDAutoSensorDevice", "1043"},
+    };
+
+    private static boolean isErrorValue(int v) {
+        return v == -2147482648 || v == -2147482647 || v == -2147482646 || v == -2147482645
+                || v == -10011 || v == -10013 || v == 65535 || v == -1;
+    }
+
+    /**
+     * Read-only: calls the protected int get(deviceType, featureId) for every temperature-related
+     * feature id, on the device its FeatureIds group belongs to, and also on the AC device.
+     */
+    private void searchAllWithProtectedGet() {
+        quietScan = true;
+        List<int[]> ids = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        scanConstants(ids, names);
+
+        Method get;
+        try {
+            get = Class.forName("android.hardware.bydauto.AbsBYDAutoDevice")
+                    .getDeclaredMethod("get", int.class, int.class);
+            get.setAccessible(true);
+        } catch (Throwable t) {
+            out.line("protected get(int,int) not found: " + root(t));
+            return;
+        }
+
+        Object[] inst = new Object[DEVICES.length];
+        for (int d = 0; d < DEVICES.length; d++) inst[d] = device(DEVICES[d][1]);
+
+        out.line("");
+        out.line("=== protected get(deviceType, featureId): non-error values ===");
+        List<String> hits = new ArrayList<>();
+        int calls = 0, errors = 0;
+        for (int i = 0; i < ids.size(); i++) {
+            String name = names.get(i);
+            int id = ids.get(i)[0];
+            for (int d = 0; d < DEVICES.length; d++) {
+                boolean own = name.contains("$" + DEVICES[d][0] + ".");
+                if (!own && d != 0) continue;
+                if (inst[d] == null) continue;
+                int type = Integer.parseInt(DEVICES[d][2]);
+                Object dev = inst[d];
+                Future<Object> f = pool.submit(() -> get.invoke(dev, type, id));
+                calls++;
+                String line;
+                try {
+                    Object r = f.get(1500, TimeUnit.MILLISECONDS);
+                    int v = (r instanceof Integer) ? (Integer) r : Integer.MIN_VALUE;
+                    if (r instanceof Integer && isErrorValue(v)) { errors++; continue; }
+                    line = "get(" + type + ", " + name + ") = " + r;
+                    if (v == 12 || v == 120 || v == 0) hits.add(line);
+                } catch (Throwable t) {
+                    f.cancel(true);
+                    String e = root(t);
+                    if (e.contains("permission")) { errors++; continue; }
+                    line = "get(" + type + ", " + name + ") -> ERR " + e;
+                }
+                out.line(line);
+            }
+        }
+        out.line("(" + calls + " calls, " + errors + " error/invalid values hidden)");
+        out.line("");
+        out.line("=== CANDIDATES (value 12, 120 or 0) ===");
+        if (hits.isEmpty()) out.line("(none)");
+        for (String h : hits) out.line(h);
     }
 
     private void dumpClass(Class<?> c) {

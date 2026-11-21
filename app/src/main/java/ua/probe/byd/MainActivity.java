@@ -30,9 +30,15 @@ public class MainActivity extends Activity {
         root.setPadding(24, 24, 24, 24);
 
         Button start = new Button(this);
-        start.setText("Start v0.2 / Почати");
+        start.setText("ADB test v0.3 / Перевірка через ADB");
         start.setTextSize(22);
         root.addView(start, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        Button start2 = new Button(this);
+        start2.setText("Probe v0.2 (без ADB)");
+        start2.setTextSize(18);
+        root.addView(start2, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         scroll = new ScrollView(this);
@@ -51,16 +57,21 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
         }
 
-        start.setOnClickListener(v -> {
-            start.setEnabled(false);
-            all.setLength(0);
-            log.setText("");
-            new Thread(() -> {
-                new Probe2(getApplicationContext(), this::append).run();
-                save();
-                runOnUiThread(() -> start.setEnabled(true));
-            }).start();
-        });
+        start.setOnClickListener(v -> runJob(start, start2, true));
+        start2.setOnClickListener(v -> runJob(start, start2, false));
+    }
+
+    private void runJob(Button a, Button b, boolean adb) {
+        a.setEnabled(false);
+        b.setEnabled(false);
+        all.setLength(0);
+        log.setText("");
+        new Thread(() -> {
+            if (adb) new AdbProbe(getApplicationContext(), this::append).run();
+            else new Probe2(getApplicationContext(), this::append).run();
+            save();
+            runOnUiThread(() -> { a.setEnabled(true); b.setEnabled(true); });
+        }).start();
     }
 
     private void append(String s) {

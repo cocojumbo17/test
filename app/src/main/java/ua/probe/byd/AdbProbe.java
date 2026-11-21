@@ -20,7 +20,7 @@ public class AdbProbe {
     }
 
     public void run() {
-        out.line("=== BYD Probe 0.3 (ADB) ===");
+        out.line("=== BYD Probe 0.4 (ADB temps) ===");
         out.line("Android " + android.os.Build.VERSION.RELEASE + " / " + android.os.Build.DISPLAY);
 
         Set<Integer> ports = new LinkedHashSet<>();
@@ -62,10 +62,8 @@ public class AdbProbe {
         String apk = ctx.getApplicationInfo().sourceDir;
         String[][] cmds = {
             {"id", "id"},
-            {"shell BYD permissions",
-                "dumpsys package com.android.shell | grep -i -E 'BYDAUTO_(AC|INSTRUMENT|SENSOR|STATISTIC|SETTING)_GET'"},
-            {"BYD services", "service list | grep -i byd | head -40"},
-            {"probe as shell", "CLASSPATH=" + apk + " app_process /system/bin ua.probe.byd.ShellMain 2>&1"},
+            {"temperature probe as shell",
+                "CLASSPATH=" + apk + " app_process /system/bin ua.probe.byd.ShellMain temps 2>&1"},
         };
         try {
             for (String[] c : cmds) {

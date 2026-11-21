@@ -30,13 +30,24 @@ public class TempProbe {
     private final Probe.Out out;
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
+    private static final int[] KEY_IDS = {
+        1031798832, 1320181776, 1077936184, 1077936168, 1246769216,
+        796311, 1067466898, 1067466908, 489689104, 489689106,
+    };
+    private static final String[] KEY_NAMES = {
+        "AC_TEMP_INSIDE", "AC_TEMP_INSIDE_FILTERING", "AC_TEMP_OUT", "AC_TEMP_MAIN",
+        "INSTRUMENT_DD_OUT_TEMP", "SENSOR_TEMPERATURE", "SETTING_INNER_CAR_AVERAGE_TEMP",
+        "SETTING_OUTSIDE_CAR_AVERAGE_TEMP", "BODYWORK_INCAR_TEMP_TRIGGER_ATOM",
+        "BODYWORK_EXTERIOR_TEMP_TRIGGER_ATOM",
+    };
+
     public TempProbe(Context ctx, Probe.Out out) {
         this.ctx = ctx;
         this.out = out;
     }
 
     public void run() {
-        out.line("=== BYD TempProbe 0.4 ===");
+        out.line("=== BYD TempProbe 0.5 ===");
         Object ac = device("android.hardware.bydauto.ac.BYDAutoAcDevice");
         Object ins = device("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
         Object sen = device("android.hardware.bydauto.sensor.BYDAutoSensorDevice");
@@ -55,23 +66,23 @@ public class TempProbe {
             if (round < 3) sleep(3000);
         }
 
-        List<int[]> ids = new ArrayList<>();
-        List<String> names = new ArrayList<>();
-        scanConstants(ids, names);
-
         out.line("");
-        out.line("=== GENERIC get(int[], Class) WITH TEMP CONSTANTS ===");
+        out.line("=== KEY FEATURE IDS VIA get(int[], Class) ===");
         Object[] devs = {ac, ins, sen};
         String[] devNames = {"ac", "ins", "sen"};
-        for (int i = 0; i < ids.size(); i++) {
-            int id = ids.get(i)[0];
+        boolean classDumped = false;
+        for (int i = 0; i < KEY_IDS.length; i++) {
+            out.line("");
+            out.line("* " + KEY_NAMES[i] + " (" + KEY_IDS[i] + ")");
             for (int d = 0; d < devs.length; d++) {
                 if (devs[d] == null) continue;
                 for (Class<?> type : new Class<?>[]{Integer.class, Double.class}) {
-                    String r = call(devs[d], "get", new Class<?>[]{int[].class, Class.class}, new int[]{id}, type);
-                    if (!r.startsWith("ERR")) {
-                        out.line(devNames[d] + ".get([" + id + "], " + type.getSimpleName() + ") = " + r
-                                + "   <- " + names.get(i));
+                    Object v = callRaw(devs[d], "get", new Class<?>[]{int[].class, Class.class},
+                            new int[]{KEY_IDS[i]}, type);
+                    out.line("  " + devNames[d] + "/" + type.getSimpleName() + ": " + describe(v));
+                    if (!classDumped && v != null && !(v instanceof Throwable)) {
+                        dumpClass(v.getClass());
+                        classDumped = true;
                     }
                 }
             }
@@ -128,6 +139,46 @@ public class TempProbe {
             out.line("scan failed: " + root(t));
         }
         out.line("(" + ids.size() + " candidate ids for get())");
+    }
+
+    /** Calls a method and returns the raw result, or the Throwable on failure. */
+    private Object callRaw(Object inst, String name, Class<?>[] types, Object... args) {
+        if (inst == null) return new IllegalStateException("no device");
+        Future<Object> f = pool.submit(() -> inst.getClass().getMethod(name, types).invoke(inst, args));
+        try {
+            return f.get(1500, TimeUnit.MILLISECONDS);
+        } catch (Throwable t) {
+            f.cancel(true);
+            while (t.getCause() != null) t = t.getCause();
+            return t;
+        }
+    }
+
+    /** Prints all fields (including inherited ones) of a result object. */
+    private static String describe(Object v) {
+        if (v == null) return "null";
+        if (v instanceof Throwable) return "ERR " + root((Throwable) v);
+        if (v instanceof Number || v instanceof String || v instanceof Boolean || v.getClass().isArray()) return fmt(v);
+        StringBuilder sb = new StringBuilder(v.getClass().getSimpleName()).append(" {");
+        for (Class<?> c = v.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers())) continue;
+                try {
+                    f.setAccessible(true);
+                    sb.append(' ').append(f.getName()).append('=').append(fmt(f.get(v))).append(';');
+                } catch (Throwable ignored) { }
+            }
+        }
+        return sb.append(" }").toString();
+    }
+
+    private void dumpClass(Class<?> c) {
+        out.line("  [class " + c.getName() + "]");
+        for (Method m : c.getMethods()) {
+            if (m.getDeclaringClass() == Object.class) continue;
+            out.line("    method " + m.getName() + "(" + m.getParameterTypes().length + " args) -> "
+                    + m.getReturnType().getSimpleName());
+        }
     }
 
     private String call(Object inst, String name, Class<?>[] types, Object... args) {

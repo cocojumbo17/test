@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
         root.setPadding(24, 24, 24, 24);
 
         Button start = new Button(this);
-        start.setText("Температури через ADB (v0.4)");
+        start.setText("Температури через ADB (v0.5)");
         start.setTextSize(22);
         root.addView(start, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));

@@ -2,6 +2,14 @@ plugins {
     id 'com.android.application'
 }
 
+// Change the version here only: it goes into the app and into the APK file name.
+def appVersionName = '0.5'
+def appVersionCode = 5
+
+base {
+    archivesName = "BydProbe-v${appVersionName}"
+}
+
 android {
     namespace 'ua.probe.byd'
     compileSdk 34
@@ -11,8 +19,25 @@ android {
         minSdk 26
         // DiLink accepts APKs with targetSdk <= 33; 29 keeps legacy storage access simple
         targetSdk 29
-        versionCode 4
-        versionName '0.4'
+        versionCode appVersionCode
+        versionName appVersionName
+    }
+
+    // Fixed signing key, so a new build can be installed over the old one.
+    // Without it every GitHub build gets a new random debug key and updates fail.
+    signingConfigs {
+        debug {
+            storeFile file('bydprobe-debug.keystore')
+            storePassword 'android'
+            keyAlias 'bydprobe'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
     }
 
     compileOptions {

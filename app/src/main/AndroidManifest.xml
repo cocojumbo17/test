@@ -19,6 +19,28 @@
     <uses-permission android:name="android.permission.BYDAUTO_STATISTIC_COMMON" />
     <uses-permission android:name="android.permission.BYDAUTO_STATISTIC_GET" />
 
+    <!-- Normal-level permissions found on this car (v0.1 report): any app may hold them -->
+    <uses-permission android:name="com.byd.car.server.PROVIDER" />
+    <uses-permission android:name="com.byd.yqzx.vehiclesystem.shared.vehicle.data" />
+    <uses-permission android:name="com.byd.permission.carsettings.READ_CARSETTINGS_PROVIDER" />
+    <uses-permission android:name="com.byd.autoiot.service.storage.AutoiotProvider.READWRITE" />
+    <uses-permission android:name="com.byd.vehicleconfig.PERMISSION_ACCESS_MAP_PROVIDER" />
+    <uses-permission android:name="com.byd.naviauto.mapprovider.permission.READ_NAVI_DATA" />
+    <uses-permission android:name="com.byd.launchermap.permission.ACCESS_SERVICE" />
+    <uses-permission android:name="com.byd.wallpaper.permission.READ_SETTINGS" />
+    <uses-permission android:name="com.byd.multipletheme.Permission.read" />
+    <uses-permission android:name="com.byd.permission.ACCOUNT_SERVICE_LINK" />
+    <uses-permission android:name="android.permission.BYDAUTO_TIME_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_PM2P5_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_ENERGY_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_TYRE_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_CHARGING_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_SPEED_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_GEARBOX_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_LIGHT_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_ENGINE_COMMON" />
+    <uses-permission android:name="android.permission.BYDAUTO_MULTIMEDIA_COMMON" />
+
     <application
         android:label="BYD Probe"
         android:requestLegacyExternalStorage="true"

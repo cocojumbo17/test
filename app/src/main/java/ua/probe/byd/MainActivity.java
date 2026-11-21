@@ -30,7 +30,7 @@ public class MainActivity extends Activity {
         root.setPadding(24, 24, 24, 24);
 
         Button start = new Button(this);
-        start.setText("Start / Почати");
+        start.setText("Start v0.2 / Почати");
         start.setTextSize(22);
         root.addView(start, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
             all.setLength(0);
             log.setText("");
             new Thread(() -> {
-                new Probe(getApplicationContext(), this::append).run();
+                new Probe2(getApplicationContext(), this::append).run();
                 save();
                 runOnUiThread(() -> start.setEnabled(true));
             }).start();

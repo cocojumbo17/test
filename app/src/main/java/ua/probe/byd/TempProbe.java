@@ -47,7 +47,7 @@ public class TempProbe {
     }
 
     public void run() {
-        out.line("=== BYD TempProbe 0.5 ===");
+        out.line("=== BYD TempProbe 0.6 ===");
         Object ac = device("android.hardware.bydauto.ac.BYDAutoAcDevice");
         Object ins = device("android.hardware.bydauto.instrument.BYDAutoInstrumentDevice");
         Object sen = device("android.hardware.bydauto.sensor.BYDAutoSensorDevice");
@@ -87,6 +87,17 @@ public class TempProbe {
                 }
             }
         }
+
+        dumpDeclared("android.hardware.bydauto.AbsBYDAutoDevice");
+        dumpDeclared("android.hardware.bydauto.ac.BYDAutoAcDevice");
+        for (String l : new String[]{
+                "android.hardware.bydauto.ac.AbsBYDAutoAcListener",
+                "android.hardware.bydauto.AbsBYDAutoListener",
+                "android.hardware.bydauto.IBYDAutoListener"}) {
+            dumpDeclared(l);
+        }
+        tryHiddenGetters(ac, "ac", 1000);
+        tryHiddenGetters(ins, "ins", 1007);
 
         out.line("");
         out.line("=== DONE ===");
@@ -170,6 +181,54 @@ public class TempProbe {
             }
         }
         return sb.append(" }").toString();
+    }
+
+    /** Lists every declared method (any visibility) with full parameter types. */
+    private void dumpDeclared(String name) {
+        out.line("");
+        out.line("=== DECLARED METHODS: " + name + " ===");
+        Class<?> c;
+        try { c = Class.forName(name); } catch (Throwable t) { out.line("  not found"); return; }
+        out.line("  superclass: " + (c.getSuperclass() == null ? "-" : c.getSuperclass().getName())
+                + "  abstract=" + Modifier.isAbstract(c.getModifiers()) + "  interface=" + c.isInterface());
+        for (Method m : c.getDeclaredMethods()) {
+            StringBuilder sb = new StringBuilder("  ").append(Modifier.toString(m.getModifiers())).append(' ')
+                    .append(m.getReturnType().getSimpleName()).append(' ').append(m.getName()).append('(');
+            Class<?>[] pt = m.getParameterTypes();
+            for (int i = 0; i < pt.length; i++) { if (i > 0) sb.append(", "); sb.append(pt[i].getName()); }
+            out.line(sb.append(')').toString());
+        }
+    }
+
+    /**
+     * Read-only: calls declared get*-style methods of the base device class that take
+     * (int) or (int, int) with the key feature ids, e.g. getInt(deviceType, featureId).
+     */
+    private void tryHiddenGetters(Object dev, String devName, int deviceType) {
+        out.line("");
+        out.line("=== HIDDEN GETTERS on " + devName + " ===");
+        if (dev == null) { out.line("  no device"); return; }
+        for (Class<?> c = dev.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Method m : c.getDeclaredMethods()) {
+                String n = m.getName();
+                if (!(n.equals("getInt") || n.equals("getDouble") || n.equals("getFloat") || n.equals("getValue")
+                        || n.equals("getIntArray") || n.equals("getDoubleArray") || n.equals("getFloatArray"))) continue;
+                Class<?>[] pt = m.getParameterTypes();
+                boolean one = pt.length == 1 && pt[0] == int.class;
+                boolean two = pt.length == 2 && pt[0] == int.class && pt[1] == int.class;
+                if (!one && !two) continue;
+                m.setAccessible(true);
+                for (int i = 0; i < KEY_IDS.length; i++) {
+                    Object[] args = one ? new Object[]{KEY_IDS[i]} : new Object[]{deviceType, KEY_IDS[i]};
+                    Future<Object> f = pool.submit(() -> m.invoke(dev, args));
+                    String r;
+                    try { r = describe(f.get(1500, TimeUnit.MILLISECONDS)); }
+                    catch (Throwable t) { f.cancel(true); r = "ERR " + root(t); }
+                    out.line("  " + c.getSimpleName() + "." + n + (one ? "(" : "(" + deviceType + ", ")
+                            + KEY_NAMES[i] + ") = " + r);
+                }
+            }
+        }
     }
 
     private void dumpClass(Class<?> c) {

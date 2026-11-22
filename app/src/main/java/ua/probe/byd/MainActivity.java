@@ -74,20 +74,28 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
         }
 
-        start.setOnClickListener(v -> runJob(start, start2, true));
-        start2.setOnClickListener(v -> runJob(start, start2, false));
+        Button start3 = new Button(this);
+        start3.setText("CarPropertyManager (без ADB)");
+        start3.setTextSize(18);
+        root.addView(start3, 4, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        Button[] all3 = {start, start2, start3};
+        start.setOnClickListener(v -> runJob(all3, 0));
+        start2.setOnClickListener(v -> runJob(all3, 1));
+        start3.setOnClickListener(v -> runJob(all3, 2));
     }
 
-    private void runJob(Button a, Button b, boolean adb) {
-        a.setEnabled(false);
-        b.setEnabled(false);
+    private void runJob(Button[] buttons, int mode) {
+        for (Button b : buttons) b.setEnabled(false);
         all.setLength(0);
         log.setText("");
         new Thread(() -> {
-            if (adb) new AdbProbe(getApplicationContext(), this::append).run();
-            else new Probe2(getApplicationContext(), this::append).run();
+            if (mode == 0) new AdbProbe(getApplicationContext(), this::append).run();
+            else if (mode == 1) new Probe2(getApplicationContext(), this::append).run();
+            else new CarProbe(getApplicationContext(), this::append).run();
             save();
-            runOnUiThread(() -> { a.setEnabled(true); b.setEnabled(true); });
+            runOnUiThread(() -> { for (Button b : buttons) b.setEnabled(true); });
         }).start();
     }
 

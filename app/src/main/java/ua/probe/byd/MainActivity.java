@@ -1,29 +1,34 @@
 package ua.probe.byd;
 
 import android.app.Activity;
-import android.content.pm.PackageManager;
-import android.graphics.Typeface;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
-
+/** Main screen: live temperatures and the floating label settings. */
 public class MainActivity extends Activity {
 
-    private TextView log;
-    private ScrollView scroll;
-    private final StringBuilder all = new StringBuilder();
+    private static final int[] COLORS = {
+        0xFFFFFFFF, 0xFFFFEB3B, 0xFFFFA726, 0xFF66BB6A, 0xFF4FC3F7, 0xFFEF5350, 0xFF000000,
+    };
+    private static final String[] COLOR_NAMES = {
+        "Білий", "Жовтий", "Помаранчевий", "Зелений", "Блакитний", "Червоний", "Чорний",
+    };
+
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView status;
+    private final Button[] swatches = new Button[COLORS.length];
+
     private final Runnable statusTick = new Runnable() {
         @Override public void run() {
             if (status != null) status.setText(TempWidget.summary(MainActivity.this));
@@ -46,154 +51,141 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-
         setTitle("BYD Temp v" + appVersion());
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(24, 24, 24, 24);
+        root.setPadding(32, 32, 32, 32);
 
         status = new TextView(this);
         status.setTextSize(30);
-        status.setPadding(0, 0, 0, 16);
+        status.setPadding(0, 0, 0, 24);
         status.setText(TempWidget.summary(this));
         root.addView(status);
 
-        Button overlayBtn = new Button(this);
-        overlayBtn.setTextSize(22);
-        overlayBtn.setText(TempOverlay.enabled(this) ? "Сховати віконце з температурою" : "Показати віконце з температурою");
-        root.addView(overlayBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        overlayBtn.setOnClickListener(v -> {
-            boolean on = !TempOverlay.enabled(this);
-            TempOverlay.setEnabled(this, on);
-            overlayBtn.setText(on ? "Сховати віконце з температурою" : "Показати віконце з температурою");
-            TempWidget.startService(this);
+        Button toggle = button(root, overlayLabel(), 22);
+        toggle.setOnClickListener(v -> {
+            TempOverlay.setEnabled(this, !TempOverlay.enabled(this));
+            toggle.setText(overlayLabel());
+            send(TempService.ACTION_STYLE);
         });
 
-        Button service = new Button(this);
-        service.setText("Оновити зараз");
-        service.setTextSize(20);
-        root.addView(service, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        service.setOnClickListener(v -> {
-            android.content.Intent i = new android.content.Intent(this, TempService.class);
-            i.setAction(TempService.ACTION_REFRESH);
-            startForegroundService(i);
+        button(root, "Повернути віконце в центр екрану", 20)
+                .setOnClickListener(v -> send(TempService.ACTION_CENTER));
+
+        button(root, "Оновити зараз", 20)
+                .setOnClickListener(v -> send(TempService.ACTION_REFRESH));
+
+        CheckBox notify = new CheckBox(this);
+        notify.setText("Системні сповіщення про зміну температури");
+        notify.setTextSize(20);
+        notify.setPadding(8, 24, 8, 8);
+        notify.setChecked(TempService.notificationsOn(this));
+        notify.setOnCheckedChangeListener((v, checked) -> {
+            prefs().edit().putBoolean("notify", checked).apply();
+            send(TempService.ACTION_STYLE);
         });
-        TempWidget.startService(this);
+        root.addView(notify);
 
-        Button start = new Button(this);
-        start.setText("Діагностика температур (ADB)");
-        start.setTextSize(18);
-        root.addView(start, new LinearLayout.LayoutParams(
+        // Background opacity
+        TextView alphaLabel = label(root, "");
+        SeekBar alpha = new SeekBar(this);
+        alpha.setMax(100);
+        alpha.setProgress(Math.round(TempOverlay.bgAlpha(this) * 100f / 255f));
+        alphaLabel.setText("Прозорість фону віконця: " + (100 - alpha.getProgress()) + "%");
+        alpha.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                prefs().edit().putInt("bg_alpha", Math.round(p * 255f / 100f)).apply();
+                alphaLabel.setText("Прозорість фону віконця: " + (100 - p) + "%");
+                if (fromUser) send(TempService.ACTION_STYLE);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) { }
+            @Override public void onStopTrackingTouch(SeekBar s) { send(TempService.ACTION_STYLE); }
+        });
+        root.addView(alpha, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        Button start2 = new Button(this);
-        start2.setText("Probe v0.2 (без ADB)");
-        start2.setTextSize(18);
-        root.addView(start2, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        scroll = new ScrollView(this);
-        log = new TextView(this);
-        log.setTypeface(Typeface.MONOSPACE);
-        log.setTextSize(14);
-        log.setTextIsSelectable(true);
-        scroll.addView(log);
-        root.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        setContentView(root);
-
-        if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        // Text colour
+        label(root, "Колір тексту віконця:");
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        for (int i = 0; i < COLORS.length; i++) {
+            Button sw = new Button(this);
+            GradientDrawable d = new GradientDrawable();
+            d.setColor(COLORS[i]);
+            d.setCornerRadius(16);
+            d.setStroke(3, 0xFF888888);
+            sw.setBackground(d);
+            sw.setTextSize(22);
+            sw.setTextColor(COLORS[i] == 0xFF000000 ? 0xFFFFFFFF : 0xFF000000);
+            sw.setContentDescription(COLOR_NAMES[i]);
+            final int color = COLORS[i];
+            sw.setOnClickListener(v -> {
+                prefs().edit().putInt("text_color", color).apply();
+                markSwatch();
+                send(TempService.ACTION_STYLE);
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, 110, 1f);
+            lp.setMargins(8, 8, 8, 8);
+            row.addView(sw, lp);
+            swatches[i] = sw;
         }
-
-        Button start3 = new Button(this);
-        start3.setText("CarPropertyManager (без ADB)");
-        start3.setTextSize(18);
-        root.addView(start3, 5, new LinearLayout.LayoutParams(
+        root.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        markSwatch();
 
-        Button[] all3 = {start, start2, start3};
-        start.setOnClickListener(v -> runJob(all3, 0));
-        start2.setOnClickListener(v -> runJob(all3, 1));
-        start3.setOnClickListener(v -> runJob(all3, 2));
+        label(root, "Віконце можна перетягнути пальцем, натискання на нього оновлює дані. "
+                + "Сніжинка з'являється, коли на вулиці нижче +" + TempWidget.SNOW_BELOW + "°.");
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(root);
+        setContentView(scroll);
+
+        TempWidget.startService(this);
     }
 
-    private void runJob(Button[] buttons, int mode) {
-        for (Button b : buttons) b.setEnabled(false);
-        all.setLength(0);
-        log.setText("");
-        new Thread(() -> {
-            if (mode == 0) new AdbProbe(getApplicationContext(), this::append).run();
-            else if (mode == 1) new Probe2(getApplicationContext(), this::append).run();
-            else new CarProbe(getApplicationContext(), this::append).run();
-            save();
-            runOnUiThread(() -> { for (Button b : buttons) b.setEnabled(true); });
-        }).start();
+    private void markSwatch() {
+        int cur = TempOverlay.textColor(this);
+        for (int i = 0; i < swatches.length; i++) swatches[i].setText(COLORS[i] == cur ? "✓" : "");
     }
 
-    private void append(String s) {
-        all.append(s).append('\n');
-        runOnUiThread(() -> {
-            log.append(s + "\n");
-            scroll.post(() -> scroll.fullScroll(ScrollView.FOCUS_DOWN));
-        });
+    private String overlayLabel() {
+        return TempOverlay.enabled(this) ? "Сховати віконце з температурою" : "Показати віконце з температурою";
     }
 
-    /** Saves the report to Downloads, the app folder and the root of any USB stick. */
-    /** App version, e.g. "1.2". */
+    private Button button(LinearLayout root, String text, int size) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(size);
+        root.addView(b, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return b;
+    }
+
+    private TextView label(LinearLayout root, String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextSize(18);
+        t.setPadding(0, 28, 0, 8);
+        root.addView(t);
+        return t;
+    }
+
+    private void send(String action) {
+        Intent i = new Intent(this, TempService.class);
+        i.setAction(action);
+        startForegroundService(i);
+    }
+
+    private android.content.SharedPreferences prefs() {
+        return getSharedPreferences(TempService.PREFS, Context.MODE_PRIVATE);
+    }
+
     private String appVersion() {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
             return "?";
-        }
-    }
-
-    private void save() {
-        String ver = appVersion();
-        String name = "byd_probe_v" + ver + ".txt";
-        String header = "BYD Temp v" + ver + "  (" + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
-                java.util.Locale.ROOT).format(new java.util.Date()) + ")\n";
-        byte[] data = (header + all).getBytes(StandardCharsets.UTF_8);
-        StringBuilder where = new StringBuilder();
-
-        File[] targets = {
-            new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name),
-            new File(getExternalFilesDir(null), name),
-        };
-        for (File f : targets) {
-            if (write(f, data)) where.append(f.getAbsolutePath()).append('\n');
-        }
-
-        File[] vols = new File("/storage").listFiles();
-        if (vols != null) {
-            for (File v : vols) {
-                String n = v.getName();
-                if (n.equals("emulated") || n.equals("self")) continue;
-                File f = new File(v, name);
-                if (write(f, data)) where.append(f.getAbsolutePath()).append('\n');
-            }
-        }
-
-        String msg = where.length() > 0 ? "\nSaved to:\n" + where : "\nCould not save file — take photos of the screen.";
-        runOnUiThread(() -> {
-            log.append(msg);
-            scroll.post(() -> scroll.fullScroll(ScrollView.FOCUS_DOWN));
-        });
-    }
-
-    private static boolean write(File f, byte[] data) {
-        try {
-            File p = f.getParentFile();
-            if (p != null) p.mkdirs();
-            try (FileOutputStream o = new FileOutputStream(f)) { o.write(data); }
-            return true;
-        } catch (Exception e) {
-            return false;
         }
     }
 }

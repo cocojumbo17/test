@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thermometer silhouette for the notification bar -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="72"
+    android:viewportHeight="72">
+    <group android:translateX="-18" android:translateY="-18">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M46,30 A8,8 0 0 1 62,30 L62,72 L46,72 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M40,78 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M65,34h7v2.5h-7z M65,42h5v2.5h-5z M65,50h7v2.5h-7z M65,58h5v2.5h-5z" />
+    </group>
+</vector>

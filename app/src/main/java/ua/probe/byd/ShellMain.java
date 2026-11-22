@@ -10,8 +10,8 @@ import java.lang.reflect.Method;
 
 /**
  * Entry point started through ADB as the "shell" user:
- *   CLASSPATH=<this apk> app_process /system/bin ua.probe.byd.ShellMain
- * It builds a system Context and runs the same read-only Probe with shell privileges.
+ *   CLASSPATH=<this apk> app_process /system/bin ua.probe.byd.ShellMain read
+ * Prints one line "TEMPS in=.. out=..".
  */
 public class ShellMain {
 
@@ -25,24 +25,14 @@ public class ShellMain {
 
     public static void main(String[] args) {
         try {
-            System.out.println("ShellMain uid=" + android.os.Process.myUid());
-            Context ctx = new ShellContext(systemContext());
-            if (args.length > 0 && args[0].equals("read")) {
-                TempRead.run(ctx);
-            } else if (args.length > 0 && args[0].equals("temps")) {
-                new TempProbe(ctx, s -> System.out.println(s)).run();
-            } else {
-                new Probe(ctx, s -> System.out.println(s)).run();
-            }
+            TempRead.run(new ShellContext(systemContext()));
         } catch (Throwable t) {
-            System.out.println("ShellMain failed: " + t);
-            t.printStackTrace(System.out);
+            System.out.println("TEMPS error=" + t);
         }
         System.out.flush();
         System.exit(0);
     }
 
-    @SuppressWarnings("JavaReflectionMemberAccess")
     static Context systemContext() throws Exception {
         if (Looper.getMainLooper() == null) Looper.prepareMainLooper();
         Class<?> at = Class.forName("android.app.ActivityThread");

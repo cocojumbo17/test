@@ -37,12 +37,21 @@ public class TempWidget extends AppWidgetProvider {
         return (v > 0 ? "+" : "") + v + "°";
     }
 
-    /** Short text for the notification, e.g. "Салон +12°  ·  Вулиця 0°". */
+    static final int SNOW_BELOW = 5;
+
+    /** Outside temperature with a snowflake when it is below +5 °C, e.g. "+2° ❄". */
+    static String fmtOut(int v) {
+        String s = fmt(v);
+        if (v != Integer.MIN_VALUE && v < SNOW_BELOW) s += " \u2744";
+        return s;
+    }
+
+    /** Short text, e.g. "Салон +15°  ·  Вулиця +2° ❄". */
     static String summary(Context ctx) {
         SharedPreferences p = ctx.getSharedPreferences(TempService.PREFS, Context.MODE_PRIVATE);
         if (!p.contains("time")) return "Немає даних: " + p.getString("status", "…");
         String s = "Салон " + fmt(p.getInt("in", Integer.MIN_VALUE))
-                + "  ·  Вулиця " + fmt(p.getInt("out", Integer.MIN_VALUE));
+                + "  ·  Вулиця " + fmtOut(p.getInt("out", Integer.MIN_VALUE));
         if (isStale(p)) s += "  (застаріло)";
         return s;
     }
@@ -55,7 +64,7 @@ public class TempWidget extends AppWidgetProvider {
         SharedPreferences p = ctx.getSharedPreferences(TempService.PREFS, Context.MODE_PRIVATE);
         RemoteViews rv = new RemoteViews(ctx.getPackageName(), R.layout.widget_temps);
         rv.setTextViewText(R.id.inside, fmt(p.getInt("in", Integer.MIN_VALUE)));
-        rv.setTextViewText(R.id.outside, fmt(p.getInt("out", Integer.MIN_VALUE)));
+        rv.setTextViewText(R.id.outside, fmtOut(p.getInt("out", Integer.MIN_VALUE)));
 
         String foot;
         if (!p.contains("time")) {

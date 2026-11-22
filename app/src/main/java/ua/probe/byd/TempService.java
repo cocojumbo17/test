@@ -23,9 +23,12 @@ import java.security.KeyPair;
 public class TempService extends Service {
 
     public static final String ACTION_REFRESH = "ua.probe.byd.REFRESH";
+    public static final String ACTION_STYLE = "ua.probe.byd.STYLE";
+    public static final String ACTION_CENTER = "ua.probe.byd.CENTER";
     static final String PREFS = "temps";
     static final long INTERVAL_MS = 30_000;
-    private static final String CHANNEL = "temps";
+    private static final String CHANNEL = "temps";            // temperatures, shown when the option is on
+    private static final String CHANNEL_QUIET = "background"; // minimal, required for a foreground service
     private static final int NOTIF_ID = 1;
 
     private HandlerThread thread;
@@ -34,6 +37,7 @@ public class TempService extends Service {
     private Handler main;
     private TempOverlay overlay;
     private boolean overlayGrantTried;
+    private String lastNotif;   // what the notification currently shows, to post only on change
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -47,7 +51,9 @@ public class TempService extends Service {
         super.onCreate();
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Температура", NotificationManager.IMPORTANCE_LOW));
-        startForeground(NOTIF_ID, buildNotification("Температура: зчитую…"));
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL_QUIET, "Робота у фоні", NotificationManager.IMPORTANCE_MIN));
+        lastNotif = notificationsOn(this) ? "Температура: зчитую…" : QUIET_TEXT;
+        startForeground(NOTIF_ID, buildNotification(lastNotif));
         thread = new HandlerThread("temps");
         thread.start();
         handler = new Handler(thread.getLooper());
@@ -62,8 +68,13 @@ public class TempService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (main != null && overlay != null) main.post(overlay::refresh);
-        if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && handler != null) {
+        String action = intent == null ? null : intent.getAction();
+        if (main != null && overlay != null) {
+            if (ACTION_CENTER.equals(action)) TempOverlay.requestCenter(this);
+            main.post(overlay::refresh);
+        }
+        if (ACTION_STYLE.equals(action)) updateNotification();
+        if (ACTION_REFRESH.equals(action) && handler != null) {
             handler.removeCallbacks(tick);
             handler.post(tick);
         }
@@ -113,8 +124,22 @@ public class TempService extends Service {
 
         TempWidget.updateAll(this);
         if (main != null && overlay != null) main.post(overlay::refresh);
+        updateNotification();
+    }
+
+    private static final String QUIET_TEXT = "BYD Temp працює у фоні";
+
+    static boolean notificationsOn(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("notify", false);
+    }
+
+    /** Posts the temperature notification only when its text changes; otherwise keeps the quiet one. */
+    private synchronized void updateNotification() {
+        String text = notificationsOn(this) ? TempWidget.summary(this) : QUIET_TEXT;
+        if (text.equals(lastNotif)) return;
+        lastNotif = text;
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        nm.notify(NOTIF_ID, buildNotification(TempWidget.summary(this)));
+        nm.notify(NOTIF_ID, buildNotification(text));
     }
 
     /** Parses "key=<int>"; returns null for missing values or BYD error codes. */
@@ -137,9 +162,11 @@ public class TempService extends Service {
         Intent open = new Intent(this, MainActivity.class);
         PendingIntent pi = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_menu_info_details)
-                .setContentTitle("BYD температура")
+        boolean on = notificationsOn(this);
+        return new Notification.Builder(this, on ? CHANNEL : CHANNEL_QUIET)
+                .setSmallIcon(R.drawable.ic_stat_thermo)
+                .setContentTitle(on ? "BYD температура" : "BYD Temp")
+                .setOnlyAlertOnce(true)
                 .setContentText(text)
                 .setContentIntent(pi)
                 .setOngoing(true)

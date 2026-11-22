@@ -3,8 +3,8 @@ plugins {
 }
 
 // Change the version here only: it goes into the app and into the APK file name.
-def appVersionName = '1.2'
-def appVersionCode = 12
+def appVersionName = '1.4'
+def appVersionCode = 14
 
 base {
     archivesName = "BydTemp-v${appVersionName}"

@@ -137,6 +137,31 @@ public class MainActivity extends Activity {
         label(root, "Віконце можна перетягнути пальцем, натискання на нього оновлює дані. "
                 + "Сніжинка з'являється, коли на вулиці нижче +" + TempWidget.SNOW_BELOW + "°.");
 
+        // TEMPORARY: read-only HUD / display check, to be removed after the test
+        Button hud = button(root, "Перевірка HUD і дисплеїв (тимчасово)", 18);
+        TextView hudLog = new TextView(this);
+        hudLog.setTextSize(13);
+        hudLog.setTypeface(android.graphics.Typeface.MONOSPACE);
+        hudLog.setTextIsSelectable(true);
+        root.addView(hudLog);
+        hud.setOnClickListener(v -> {
+            if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+            }
+            hud.setEnabled(false);
+            hudLog.setText("");
+            StringBuilder sb = new StringBuilder("BYD Temp v" + appVersion() + "\n");
+            new Thread(() -> {
+                new HudProbe(getApplicationContext(), line -> {
+                    sb.append(line).append('\n');
+                    ui.post(() -> hudLog.append(line + "\n"));
+                }).run();
+                String where = ReportFile.save(this, "byd_hud_v" + appVersion() + ".txt", sb.toString());
+                ui.post(() -> { hudLog.append(where); hud.setEnabled(true); });
+            }).start();
+        });
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);

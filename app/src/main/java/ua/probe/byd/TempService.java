@@ -37,12 +37,16 @@ public class TempService extends Service {
     private Handler main;
     private TempOverlay overlay;
     private boolean overlayGrantTried;
-    private String lastNotif;   // what the notification currently shows, to post only on change
+    private String lastNotif;
+    private int failures;   // what the notification currently shows, to post only on change
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
-            readOnce();
-            handler.postDelayed(this, INTERVAL_MS);
+            boolean ok = readOnce();
+            // After engine start ADB may not be ready yet: retry fast (2, 4, 8, 16 s), then every 30 s.
+            failures = ok ? 0 : failures + 1;
+            long delay = ok ? INTERVAL_MS : Math.min(INTERVAL_MS, 2000L << Math.min(failures - 1, 4));
+            handler.postDelayed(this, delay);
         }
     };
 
@@ -81,7 +85,8 @@ public class TempService extends Service {
         return START_STICKY;
     }
 
-    private void readOnce() {
+    /** Reads both temperatures once; returns true when fresh values were received. */
+    private boolean readOnce() {
         String status;
         Integer in = null, out = null;
         try {
@@ -125,6 +130,7 @@ public class TempService extends Service {
         TempWidget.updateAll(this);
         if (main != null && overlay != null) main.post(overlay::refresh);
         updateNotification();
+        return in != null || out != null;
     }
 
     private static final String QUIET_TEXT = "BYD Temp працює у фоні";

@@ -52,7 +52,7 @@ public class TempWidget extends AppWidgetProvider {
         if (!p.contains("time")) return "Немає даних: " + p.getString("status", "…");
         String s = "Салон " + fmt(p.getInt("in", Integer.MIN_VALUE))
                 + "  ·  Вулиця " + fmtOut(p.getInt("out", Integer.MIN_VALUE));
-        if (isStale(p)) s += "  (застаріло)";
+        if (isStale(p)) s += " …";   // last known values, fresh ones are on the way
         return s;
     }
 

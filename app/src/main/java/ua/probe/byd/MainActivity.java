@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
             send(TempService.ACTION_STYLE);
         });
 
-        button(root, "Повернути віконце в центр екрану", 20)
+        button(root, "Повернути віконце в центр екрана", 20)
                 .setOnClickListener(v -> send(TempService.ACTION_CENTER));
 
         button(root, "Оновити зараз", 20)
@@ -137,36 +137,64 @@ public class MainActivity extends Activity {
         label(root, "Віконце можна перетягнути пальцем, натискання на нього оновлює дані. "
                 + "Сніжинка з'являється, коли на вулиці нижче +" + TempWidget.SNOW_BELOW + "°.");
 
-        // TEMPORARY: read-only HUD / display check, to be removed after the test
-        Button hud = button(root, "Перевірка HUD і дисплеїв (тимчасово)", 18);
-        TextView hudLog = new TextView(this);
-        hudLog.setTextSize(13);
-        hudLog.setTypeface(android.graphics.Typeface.MONOSPACE);
-        hudLog.setTextIsSelectable(true);
-        root.addView(hudLog);
-        hud.setOnClickListener(v -> {
-            if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
-            }
-            hud.setEnabled(false);
-            hudLog.setText("");
-            StringBuilder sb = new StringBuilder("BYD Temp v" + appVersion() + "\n");
-            new Thread(() -> {
-                new HudProbe(getApplicationContext(), line -> {
-                    sb.append(line).append('\n');
-                    ui.post(() -> hudLog.append(line + "\n"));
-                }).run();
-                String where = ReportFile.save(this, "byd_hud_v" + appVersion() + ".txt", sb.toString());
-                ui.post(() -> { hudLog.append(where); hud.setEnabled(true); });
-            }).start();
-        });
+        // EXPERIMENT: one text line on the instrument cluster, only on button press
+        label(root, "Експеримент: текст на приладовій панелі (sendAddressInfo)");
+        android.widget.EditText text = new android.widget.EditText(this);
+        text.setTextSize(20);
+        text.setText("BYD Temp тест");
+        root.addView(text, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        android.widget.EditText type = new android.widget.EditText(this);
+        type.setTextSize(20);
+        type.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        type.setHint("число (перший параметр)");
+        type.setText("0");
+        root.addView(type, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        Button sendBtn = button(root, "Надіслати на панель", 18);
+        Button clearBtn = button(root, "Очистити (clearInfo з тим самим числом)", 18);
+        TextView result = new TextView(this);
+        result.setTextSize(16);
+        result.setTextIsSelectable(true);
+        root.addView(result);
+        sendBtn.setOnClickListener(v -> clusterCommand("addr", type, text.getText().toString(), result, sendBtn, clearBtn));
+        clearBtn.setOnClickListener(v -> clusterCommand("clear", type, "", result, sendBtn, clearBtn));
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
 
         TempWidget.startService(this);
+    }
+
+    /** Runs ShellMain addr/clear through the car's ADB and shows the output. */
+    private void clusterCommand(String mode, android.widget.EditText typeField, String text,
+                                TextView result, Button a, Button b) {
+        String t = typeField.getText().toString().trim();
+        if (!t.matches("-?\\d{1,9}")) { result.setText("Введіть ціле число"); return; }
+        a.setEnabled(false);
+        b.setEnabled(false);
+        result.setText("Надсилаю…");
+        String arg = mode.equals("addr")
+                ? " " + java.util.Base64.getUrlEncoder().withoutPadding()
+                        .encodeToString(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                : "";
+        String cmd = "CLASSPATH=" + getApplicationInfo().sourceDir
+                + " app_process /system/bin ua.probe.byd.ShellMain " + mode + " " + t + arg + " 2>&1";
+        new Thread(() -> {
+            StringBuilder sb = new StringBuilder();
+            AdbClient adb = null;
+            try {
+                adb = AdbClient.connect("127.0.0.1", 5555,
+                        AdbClient.loadOrCreateKeys(getFilesDir()), 60_000, s -> { });
+                adb.shell(cmd, 20_000, line -> sb.append(line).append('\n'));
+            } catch (Exception e) {
+                sb.append("ADB: ").append(e);
+            } finally {
+                if (adb != null) adb.close();
+            }
+            ui.post(() -> { result.setText(sb.toString()); a.setEnabled(true); b.setEnabled(true); });
+        }).start();
     }
 
     private void markSwatch() {

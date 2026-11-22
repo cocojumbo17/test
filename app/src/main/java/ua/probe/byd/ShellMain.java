@@ -25,8 +25,8 @@ public class ShellMain {
 
     public static void main(String[] args) {
         try {
-            if (args.length > 0 && args[0].equals("hud")) {
-                HudScan.run();
+            if (args.length >= 2 && (args[0].equals("addr") || args[0].equals("clear"))) {
+                ClusterText.run(new ShellContext(systemContext()), args);
             } else {
                 TempRead.run(new ShellContext(systemContext()));
             }

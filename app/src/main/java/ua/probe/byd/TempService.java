@@ -11,12 +11,14 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
+import android.provider.Settings;
 
 import java.security.KeyPair;
 
 /**
  * Foreground service: every 30 s reads cabin/outside temperature through the car's own ADB
- * (as the shell user) and pushes it to the home-screen widget and the notification.
+ * (as the shell user) and pushes it to the floating label, the widget and the notification.
  */
 public class TempService extends Service {
 
@@ -29,6 +31,9 @@ public class TempService extends Service {
     private HandlerThread thread;
     private Handler handler;
     private AdbClient adb;
+    private Handler main;
+    private TempOverlay overlay;
+    private boolean overlayGrantTried;
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
@@ -46,11 +51,18 @@ public class TempService extends Service {
         thread = new HandlerThread("temps");
         thread.start();
         handler = new Handler(thread.getLooper());
+        main = new Handler(Looper.getMainLooper());
+        overlay = new TempOverlay(this, () -> {
+            handler.removeCallbacks(tick);
+            handler.post(tick);
+        });
+        main.post(overlay::refresh);
         handler.post(tick);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (main != null && overlay != null) main.post(overlay::refresh);
         if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && handler != null) {
             handler.removeCallbacks(tick);
             handler.post(tick);
@@ -65,6 +77,11 @@ public class TempService extends Service {
             if (adb == null) {
                 KeyPair kp = AdbClient.loadOrCreateKeys(getFilesDir());
                 adb = AdbClient.connect("127.0.0.1", 5555, kp, 60_000, s -> { });
+            }
+            // One-time: let the app draw the floating label (car has no settings screen for it).
+            if (!overlayGrantTried && !Settings.canDrawOverlays(this)) {
+                overlayGrantTried = true;
+                adb.shell("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow", 10_000, l -> { });
             }
             final String[] line = new String[1];
             String apk = getApplicationInfo().sourceDir;
@@ -95,6 +112,7 @@ public class TempService extends Service {
         ed.apply();
 
         TempWidget.updateAll(this);
+        if (main != null && overlay != null) main.post(overlay::refresh);
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         nm.notify(NOTIF_ID, buildNotification(TempWidget.summary(this)));
     }
@@ -131,6 +149,7 @@ public class TempService extends Service {
     @Override
     public void onDestroy() {
         if (handler != null) handler.removeCallbacksAndMessages(null);
+        if (overlay != null) overlay.hide();
         if (adb != null) adb.close();
         if (thread != null) thread.quitSafely();
         super.onDestroy();

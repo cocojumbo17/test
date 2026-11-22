@@ -20,7 +20,7 @@ public class AdbProbe {
     }
 
     public void run() {
-        out.line("=== BYD Probe 0.7 (ADB temps) ===");
+        out.line("=== BYD Probe 1.2 (ADB temps) ===");
         out.line("Android " + android.os.Build.VERSION.RELEASE + " / " + android.os.Build.DISPLAY);
 
         Set<Integer> ports = new LinkedHashSet<>();

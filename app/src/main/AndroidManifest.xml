@@ -3,6 +3,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Standard Android car API permissions (for the CarPropertyManager probe) -->
     <uses-permission android:name="android.car.permission.CAR_EXTERIOR_ENVIRONMENT" />

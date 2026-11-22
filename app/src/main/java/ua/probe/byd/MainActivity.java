@@ -5,6 +5,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -20,29 +22,63 @@ public class MainActivity extends Activity {
     private TextView log;
     private ScrollView scroll;
     private final StringBuilder all = new StringBuilder();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private TextView status;
+    private final Runnable statusTick = new Runnable() {
+        @Override public void run() {
+            if (status != null) status.setText(TempWidget.summary(MainActivity.this));
+            ui.postDelayed(this, 2000);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ui.post(statusTick);
+    }
+
+    @Override
+    protected void onPause() {
+        ui.removeCallbacks(statusTick);
+        super.onPause();
+    }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
 
+        setTitle("BYD Temp v" + appVersion());
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24, 24, 24, 24);
 
-        TextView status = new TextView(this);
-        status.setTextSize(26);
+        status = new TextView(this);
+        status.setTextSize(30);
         status.setPadding(0, 0, 0, 16);
         status.setText(TempWidget.summary(this));
         root.addView(status);
 
+        Button overlayBtn = new Button(this);
+        overlayBtn.setTextSize(22);
+        overlayBtn.setText(TempOverlay.enabled(this) ? "Сховати віконце з температурою" : "Показати віконце з температурою");
+        root.addView(overlayBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        overlayBtn.setOnClickListener(v -> {
+            boolean on = !TempOverlay.enabled(this);
+            TempOverlay.setEnabled(this, on);
+            overlayBtn.setText(on ? "Сховати віконце з температурою" : "Показати віконце з температурою");
+            TempWidget.startService(this);
+        });
+
         Button service = new Button(this);
-        service.setText("Запустити оновлення температур");
-        service.setTextSize(22);
+        service.setText("Оновити зараз");
+        service.setTextSize(20);
         root.addView(service, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         service.setOnClickListener(v -> {
-            TempWidget.startService(this);
-            status.setText("Сервіс запущено. Дані з'являться за кілька секунд у сповіщенні та на віджеті.");
+            android.content.Intent i = new android.content.Intent(this, TempService.class);
+            i.setAction(TempService.ACTION_REFRESH);
+            startForegroundService(i);
         });
         TempWidget.startService(this);
 
@@ -77,7 +113,7 @@ public class MainActivity extends Activity {
         Button start3 = new Button(this);
         start3.setText("CarPropertyManager (без ADB)");
         start3.setTextSize(18);
-        root.addView(start3, 4, new LinearLayout.LayoutParams(
+        root.addView(start3, 5, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button[] all3 = {start, start2, start3};
@@ -108,13 +144,26 @@ public class MainActivity extends Activity {
     }
 
     /** Saves the report to Downloads, the app folder and the root of any USB stick. */
+    /** App version, e.g. "1.2". */
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
     private void save() {
-        byte[] data = all.toString().getBytes(StandardCharsets.UTF_8);
+        String ver = appVersion();
+        String name = "byd_probe_v" + ver + ".txt";
+        String header = "BYD Temp v" + ver + "  (" + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
+                java.util.Locale.ROOT).format(new java.util.Date()) + ")\n";
+        byte[] data = (header + all).getBytes(StandardCharsets.UTF_8);
         StringBuilder where = new StringBuilder();
 
         File[] targets = {
-            new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "byd_probe.txt"),
-            new File(getExternalFilesDir(null), "byd_probe.txt"),
+            new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name),
+            new File(getExternalFilesDir(null), name),
         };
         for (File f : targets) {
             if (write(f, data)) where.append(f.getAbsolutePath()).append('\n');
@@ -125,7 +174,7 @@ public class MainActivity extends Activity {
             for (File v : vols) {
                 String n = v.getName();
                 if (n.equals("emulated") || n.equals("self")) continue;
-                File f = new File(v, "byd_probe.txt");
+                File f = new File(v, name);
                 if (write(f, data)) where.append(f.getAbsolutePath()).append('\n');
             }
         }

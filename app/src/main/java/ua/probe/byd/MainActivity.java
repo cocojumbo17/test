@@ -105,6 +105,25 @@ public class MainActivity extends Activity {
         root.addView(alpha, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        // Text size
+        TextView sizeLabel = label(root, "");
+        SeekBar size = new SeekBar(this);
+        size.setMax(TempOverlay.MAX_TEXT_SIZE - TempOverlay.MIN_TEXT_SIZE);
+        size.setProgress(TempOverlay.textSize(this) - TempOverlay.MIN_TEXT_SIZE);
+        sizeLabel.setText("Розмір шрифту віконця: " + TempOverlay.textSize(this));
+        size.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                int sp = TempOverlay.MIN_TEXT_SIZE + p;
+                prefs().edit().putInt("text_size", sp).apply();
+                sizeLabel.setText("Розмір шрифту віконця: " + sp);
+                if (fromUser) send(TempService.ACTION_STYLE);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) { }
+            @Override public void onStopTrackingTouch(SeekBar s) { send(TempService.ACTION_STYLE); }
+        });
+        root.addView(size, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         // Text colour
         label(root, "Колір тексту віконця:");
         LinearLayout row = new LinearLayout(this);
@@ -137,64 +156,11 @@ public class MainActivity extends Activity {
         label(root, "Віконце можна перетягнути пальцем, натискання на нього оновлює дані. "
                 + "Сніжинка з'являється, коли на вулиці нижче +" + TempWidget.SNOW_BELOW + "°.");
 
-        // EXPERIMENT: one text line on the instrument cluster, only on button press
-        label(root, "Експеримент: текст на приладовій панелі (sendAddressInfo)");
-        android.widget.EditText text = new android.widget.EditText(this);
-        text.setTextSize(20);
-        text.setText("BYD Temp тест");
-        root.addView(text, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        android.widget.EditText type = new android.widget.EditText(this);
-        type.setTextSize(20);
-        type.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        type.setHint("число (перший параметр)");
-        type.setText("0");
-        root.addView(type, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        Button sendBtn = button(root, "Надіслати на панель", 18);
-        Button clearBtn = button(root, "Очистити (clearInfo з тим самим числом)", 18);
-        TextView result = new TextView(this);
-        result.setTextSize(16);
-        result.setTextIsSelectable(true);
-        root.addView(result);
-        sendBtn.setOnClickListener(v -> clusterCommand("addr", type, text.getText().toString(), result, sendBtn, clearBtn));
-        clearBtn.setOnClickListener(v -> clusterCommand("clear", type, "", result, sendBtn, clearBtn));
-
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
 
         TempWidget.startService(this);
-    }
-
-    /** Runs ShellMain addr/clear through the car's ADB and shows the output. */
-    private void clusterCommand(String mode, android.widget.EditText typeField, String text,
-                                TextView result, Button a, Button b) {
-        String t = typeField.getText().toString().trim();
-        if (!t.matches("-?\\d{1,9}")) { result.setText("Введіть ціле число"); return; }
-        a.setEnabled(false);
-        b.setEnabled(false);
-        result.setText("Надсилаю…");
-        String arg = mode.equals("addr")
-                ? " " + java.util.Base64.getUrlEncoder().withoutPadding()
-                        .encodeToString(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
-                : "";
-        String cmd = "CLASSPATH=" + getApplicationInfo().sourceDir
-                + " app_process /system/bin ua.probe.byd.ShellMain " + mode + " " + t + arg + " 2>&1";
-        new Thread(() -> {
-            StringBuilder sb = new StringBuilder();
-            AdbClient adb = null;
-            try {
-                adb = AdbClient.connect("127.0.0.1", 5555,
-                        AdbClient.loadOrCreateKeys(getFilesDir()), 60_000, s -> { });
-                adb.shell(cmd, 20_000, line -> sb.append(line).append('\n'));
-            } catch (Exception e) {
-                sb.append("ADB: ").append(e);
-            } finally {
-                if (adb != null) adb.close();
-            }
-            ui.post(() -> { result.setText(sb.toString()); a.setEnabled(true); b.setEnabled(true); });
-        }).start();
     }
 
     private void markSwatch() {

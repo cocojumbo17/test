@@ -22,6 +22,7 @@ public class TempOverlay {
     static final int DEFAULT_BG_ALPHA = 204;          // 80 %
     static final int DEFAULT_TEXT_COLOR = 0xFFFFFFFF;  // white
     private static final int BG_RGB = 0x1E2329;
+    static final int MIN_TEXT_SIZE = 14, MAX_TEXT_SIZE = 40, DEFAULT_TEXT_SIZE = 22;
 
     private final Context ctx;
     private final Runnable onTap;
@@ -47,6 +48,11 @@ public class TempOverlay {
 
     static int textColor(Context ctx) { return prefs(ctx).getInt("text_color", DEFAULT_TEXT_COLOR); }
 
+    static int textSize(Context ctx) {
+        int sp = prefs(ctx).getInt("text_size", DEFAULT_TEXT_SIZE);
+        return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, sp));
+    }
+
     /** Asks for the label to be centred the next time it is shown or refreshed. */
     static void requestCenter(Context ctx) { prefs(ctx).edit().putInt("ox", -1).putInt("oy", -1).apply(); }
 
@@ -66,8 +72,15 @@ public class TempOverlay {
     public void applyStyle() {
         if (view == null) return;
         view.setTextColor(textColor(ctx));
+        int sp = textSize(ctx);
+        view.setTextSize(sp);
+        // padding and corners grow with the font so the label keeps its proportions
+        int padH = Math.round(sp * 1.3f), padV = Math.round(sp * 0.65f);
+        view.setPadding(padH, padV, padH, padV);
+        bg.setCornerRadius(sp * 1.6f);
         bg.setColor((bgAlpha(ctx) << 24) | BG_RGB);
         view.setBackground(bg);
+        view.post(this::update);
     }
 
     /** Puts the label in the middle of the screen and remembers that position. */
@@ -84,10 +97,7 @@ public class TempOverlay {
         try {
             wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
             view = new TextView(ctx);
-            view.setTextSize(22);
-            view.setPadding(28, 14, 28, 14);
             bg = new GradientDrawable();
-            bg.setCornerRadius(36);
 
             SharedPreferences p = prefs(ctx);
             lp = new WindowManager.LayoutParams(

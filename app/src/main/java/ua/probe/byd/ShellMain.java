@@ -25,11 +25,7 @@ public class ShellMain {
 
     public static void main(String[] args) {
         try {
-            if (args.length >= 2 && (args[0].equals("addr") || args[0].equals("clear"))) {
-                ClusterText.run(new ShellContext(systemContext()), args);
-            } else {
-                TempRead.run(new ShellContext(systemContext()));
-            }
+            TempRead.run(new ShellContext(systemContext()));
         } catch (Throwable t) {
             System.out.println("TEMPS error=" + t);
         }

@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
@@ -43,7 +45,7 @@
     <uses-permission android:name="android.permission.BYDAUTO_MULTIMEDIA_COMMON" />
 
     <application
-        android:label="BYD Probe"
+        android:label="BYD Temp"
         android:requestLegacyExternalStorage="true"
         android:theme="@android:style/Theme.DeviceDefault">
         <activity
@@ -55,5 +57,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".TempService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".TempWidget"
+            android:exported="true"
+            android:label="BYD температура">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_temps_info" />
+        </receiver>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

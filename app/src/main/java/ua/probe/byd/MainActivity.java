@@ -29,9 +29,26 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24, 24, 24, 24);
 
+        TextView status = new TextView(this);
+        status.setTextSize(26);
+        status.setPadding(0, 0, 0, 16);
+        status.setText(TempWidget.summary(this));
+        root.addView(status);
+
+        Button service = new Button(this);
+        service.setText("Запустити оновлення температур");
+        service.setTextSize(22);
+        root.addView(service, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        service.setOnClickListener(v -> {
+            TempWidget.startService(this);
+            status.setText("Сервіс запущено. Дані з'являться за кілька секунд у сповіщенні та на віджеті.");
+        });
+        TempWidget.startService(this);
+
         Button start = new Button(this);
-        start.setText("Температури через ADB (v0.7)");
-        start.setTextSize(22);
+        start.setText("Діагностика температур (ADB)");
+        start.setTextSize(18);
         root.addView(start, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 

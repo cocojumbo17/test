@@ -1,0 +1,141 @@
+package ua.probe.byd;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.IBinder;
+
+import java.security.KeyPair;
+
+/**
+ * Foreground service: every 30 s reads cabin/outside temperature through the car's own ADB
+ * (as the shell user) and pushes it to the home-screen widget and the notification.
+ */
+public class TempService extends Service {
+
+    public static final String ACTION_REFRESH = "ua.probe.byd.REFRESH";
+    static final String PREFS = "temps";
+    static final long INTERVAL_MS = 30_000;
+    private static final String CHANNEL = "temps";
+    private static final int NOTIF_ID = 1;
+
+    private HandlerThread thread;
+    private Handler handler;
+    private AdbClient adb;
+
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            readOnce();
+            handler.postDelayed(this, INTERVAL_MS);
+        }
+    };
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Температура", NotificationManager.IMPORTANCE_LOW));
+        startForeground(NOTIF_ID, buildNotification("Температура: зчитую…"));
+        thread = new HandlerThread("temps");
+        thread.start();
+        handler = new Handler(thread.getLooper());
+        handler.post(tick);
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && handler != null) {
+            handler.removeCallbacks(tick);
+            handler.post(tick);
+        }
+        return START_STICKY;
+    }
+
+    private void readOnce() {
+        String status;
+        Integer in = null, out = null;
+        try {
+            if (adb == null) {
+                KeyPair kp = AdbClient.loadOrCreateKeys(getFilesDir());
+                adb = AdbClient.connect("127.0.0.1", 5555, kp, 60_000, s -> { });
+            }
+            final String[] line = new String[1];
+            String apk = getApplicationInfo().sourceDir;
+            adb.shell("CLASSPATH=" + apk + " app_process /system/bin ua.probe.byd.ShellMain read 2>&1",
+                    20_000, l -> { if (l.startsWith("TEMPS ")) line[0] = l; });
+            if (line[0] == null) {
+                status = "немає відповіді";
+            } else if (line[0].contains("error=")) {
+                status = line[0].substring(line[0].indexOf("error=") + 6);
+            } else {
+                in = parse(line[0], "in=");
+                out = parse(line[0], "out=");
+                status = "ok";
+            }
+        } catch (Exception e) {
+            status = "ADB: " + e.getClass().getSimpleName();
+            if (adb != null) adb.close();
+            adb = null;
+        }
+
+        SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+        ed.putString("status", status);
+        if (in != null || out != null) {
+            ed.putInt("in", in == null ? Integer.MIN_VALUE : in);
+            ed.putInt("out", out == null ? Integer.MIN_VALUE : out);
+            ed.putLong("time", System.currentTimeMillis());
+        }
+        ed.apply();
+
+        TempWidget.updateAll(this);
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        nm.notify(NOTIF_ID, buildNotification(TempWidget.summary(this)));
+    }
+
+    /** Parses "key=<int>"; returns null for missing values or BYD error codes. */
+    static Integer parse(String line, String key) {
+        int i = line.indexOf(key);
+        if (i < 0) return null;
+        int j = i + key.length();
+        int k = j;
+        while (k < line.length() && (Character.isDigit(line.charAt(k)) || line.charAt(k) == '-')) k++;
+        try {
+            int v = Integer.parseInt(line.substring(j, k));
+            // Plausible air temperatures only; BYD error codes are huge negatives, 65535, 195, etc.
+            return (v >= -50 && v <= 90) ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Notification buildNotification(String text) {
+        Intent open = new Intent(this, MainActivity.class);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Builder(this, CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_menu_info_details)
+                .setContentTitle("BYD температура")
+                .setContentText(text)
+                .setContentIntent(pi)
+                .setOngoing(true)
+                .build();
+    }
+
+    @Override
+    public void onDestroy() {
+        if (handler != null) handler.removeCallbacksAndMessages(null);
+        if (adb != null) adb.close();
+        if (thread != null) thread.quitSafely();
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) { return null; }
+}

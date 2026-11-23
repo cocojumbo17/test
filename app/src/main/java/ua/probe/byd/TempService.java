@@ -1,190 +1,117 @@
 package ua.probe.byd;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 
-import java.security.KeyPair;
-
 /**
- * Foreground service: every 30 s reads cabin/outside temperature through the car's own ADB
- * (as the shell user) and pushes it to the floating label, the widget and the notification.
+ * Foreground service: reads cabin and outside temperature from the car on a schedule and
+ * publishes them to the floating label, the widget and the notification.
+ * Reading happens on a worker thread; the label is touched only on the main thread.
  */
 public class TempService extends Service {
 
     public static final String ACTION_REFRESH = "ua.probe.byd.REFRESH";
     public static final String ACTION_STYLE = "ua.probe.byd.STYLE";
     public static final String ACTION_CENTER = "ua.probe.byd.CENTER";
-    static final String PREFS = "temps";
-    static final long INTERVAL_MS = 30_000;
-    private static final String CHANNEL = "temps";            // temperatures, shown when the option is on
-    private static final String CHANNEL_QUIET = "background"; // minimal, required for a foreground service
-    private static final int NOTIF_ID = 1;
 
-    private HandlerThread thread;
-    private Handler handler;
-    private AdbClient adb;
-    private Handler main;
+    private HandlerThread worker;
+    private Handler workerHandler;
+    private Handler mainHandler;
+    private CarShell carShell;
     private TempOverlay overlay;
-    private boolean overlayGrantTried;
-    private String lastNotif;
-    private int failures;   // what the notification currently shows, to post only on change
+    private TempNotifier notifier;
+    private boolean overlayPermissionGranted;
+    private int consecutiveFailures;
 
-    private final Runnable tick = new Runnable() {
+    private final Runnable readLoop = new Runnable() {
         @Override public void run() {
-            boolean ok = readOnce();
-            // After engine start ADB may not be ready yet: retry fast (2, 4, 8, 16 s), then every 30 s.
-            failures = ok ? 0 : failures + 1;
-            long delay = ok ? INTERVAL_MS : Math.min(INTERVAL_MS, 2000L << Math.min(failures - 1, 4));
-            handler.postDelayed(this, delay);
+            boolean fresh = readAndPublish();
+            consecutiveFailures = fresh ? 0 : consecutiveFailures + 1;
+            workerHandler.postDelayed(this, RetryPolicy.nextDelayMs(consecutiveFailures));
         }
     };
+
+    static void start(Context ctx) {
+        ctx.startForegroundService(new Intent(ctx, TempService.class));
+    }
+
+    static void send(Context ctx, String action) {
+        ctx.startForegroundService(new Intent(ctx, TempService.class).setAction(action));
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Температура", NotificationManager.IMPORTANCE_LOW));
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL_QUIET, "Робота у фоні", NotificationManager.IMPORTANCE_MIN));
-        lastNotif = notificationsOn(this) ? "Температура: зчитую…" : QUIET_TEXT;
-        startForeground(NOTIF_ID, buildNotification(lastNotif));
-        thread = new HandlerThread("temps");
-        thread.start();
-        handler = new Handler(thread.getLooper());
-        main = new Handler(Looper.getMainLooper());
-        overlay = new TempOverlay(this, () -> {
-            handler.removeCallbacks(tick);
-            handler.post(tick);
-        });
-        main.post(overlay::refresh);
-        handler.post(tick);
+        notifier = new TempNotifier(this);
+        startForeground(TempNotifier.ID, notifier.initial());
+        carShell = new CarShell(this);
+        mainHandler = new Handler(Looper.getMainLooper());
+        worker = new HandlerThread("temps");
+        worker.start();
+        workerHandler = new Handler(worker.getLooper());
+        overlay = new TempOverlay(this, this::readNow);
+        refreshOverlay();
+        workerHandler.post(readLoop);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
-        if (main != null && overlay != null) {
-            if (ACTION_CENTER.equals(action)) TempOverlay.requestCenter(this);
-            main.post(overlay::refresh);
-        }
-        if (ACTION_STYLE.equals(action)) updateNotification();
-        if (ACTION_REFRESH.equals(action) && handler != null) {
-            handler.removeCallbacks(tick);
-            handler.post(tick);
-        }
+        if (ACTION_CENTER.equals(action)) AppPrefs.of(this).requestOverlayCenter();
+        if (ACTION_REFRESH.equals(action)) readNow();
+        refreshOverlay();
+        notifier.update();
         return START_STICKY;
     }
 
-    /** Reads both temperatures once; returns true when fresh values were received. */
-    private boolean readOnce() {
-        String status;
-        Integer in = null, out = null;
-        try {
-            if (adb == null) {
-                KeyPair kp = AdbClient.loadOrCreateKeys(getFilesDir());
-                adb = AdbClient.connect("127.0.0.1", 5555, kp, 60_000, s -> { });
-            }
-            // One-time: let the app draw the floating label (car has no settings screen for it).
-            if (!overlayGrantTried && !Settings.canDrawOverlays(this)) {
-                overlayGrantTried = true;
-                adb.shell("appops set " + getPackageName() + " SYSTEM_ALERT_WINDOW allow", 10_000, l -> { });
-            }
-            final String[] line = new String[1];
-            String apk = getApplicationInfo().sourceDir;
-            adb.shell("CLASSPATH=" + apk + " app_process /system/bin ua.probe.byd.ShellMain read 2>&1",
-                    20_000, l -> { if (l.startsWith("TEMPS ")) line[0] = l; });
-            if (line[0] == null) {
-                status = "немає відповіді";
-            } else if (line[0].contains("error=")) {
-                status = line[0].substring(line[0].indexOf("error=") + 6);
-            } else {
-                in = parse(line[0], "in=");
-                out = parse(line[0], "out=");
-                status = "ok";
-            }
-        } catch (Exception e) {
-            status = "ADB: " + e.getClass().getSimpleName();
-            if (adb != null) adb.close();
-            adb = null;
-        }
+    private void readNow() {
+        workerHandler.removeCallbacks(readLoop);
+        workerHandler.post(readLoop);
+    }
 
-        SharedPreferences.Editor ed = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
-        ed.putString("status", status);
-        if (in != null || out != null) {
-            ed.putInt("in", in == null ? Integer.MIN_VALUE : in);
-            ed.putInt("out", out == null ? Integer.MIN_VALUE : out);
-            ed.putLong("time", System.currentTimeMillis());
-        }
-        ed.apply();
+    /** Worker thread. Returns true when fresh values arrived. */
+    private boolean readAndPublish() {
+        grantOverlayPermissionOnce();
+        TempReply reply = carShell.readTemperatures();
+        store(reply);
+        publish();
+        return reply.hasValues();
+    }
 
+    /** Retried on every read until it succeeds, because ADB may not be ready right after start. */
+    private void grantOverlayPermissionOnce() {
+        if (overlayPermissionGranted || Settings.canDrawOverlays(this)) return;
+        overlayPermissionGranted = carShell.grantOverlayPermission();
+    }
+
+    private void store(TempReply reply) {
+        AppPrefs prefs = AppPrefs.of(this);
+        prefs.saveStatus(reply.status());
+        if (reply.hasValues()) prefs.saveReading(reply.inside, reply.outside, System.currentTimeMillis());
+    }
+
+    private void publish() {
         TempWidget.updateAll(this);
-        if (main != null && overlay != null) main.post(overlay::refresh);
-        updateNotification();
-        return in != null || out != null;
+        refreshOverlay();
+        notifier.update();
     }
 
-    private static final String QUIET_TEXT = "BYD Temp працює у фоні";
-
-    static boolean notificationsOn(Context ctx) {
-        return ctx.getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("notify", false);
-    }
-
-    /** Posts the temperature notification only when its text changes; otherwise keeps the quiet one. */
-    private synchronized void updateNotification() {
-        String text = notificationsOn(this) ? TempWidget.summary(this) : QUIET_TEXT;
-        if (text.equals(lastNotif)) return;
-        lastNotif = text;
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        nm.notify(NOTIF_ID, buildNotification(text));
-    }
-
-    /** Parses "key=<int>"; returns null for missing values or BYD error codes. */
-    static Integer parse(String line, String key) {
-        int i = line.indexOf(key);
-        if (i < 0) return null;
-        int j = i + key.length();
-        int k = j;
-        while (k < line.length() && (Character.isDigit(line.charAt(k)) || line.charAt(k) == '-')) k++;
-        try {
-            int v = Integer.parseInt(line.substring(j, k));
-            // Plausible air temperatures only; BYD error codes are huge negatives, 65535, 195, etc.
-            return (v >= -50 && v <= 90) ? v : null;
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Notification buildNotification(String text) {
-        Intent open = new Intent(this, MainActivity.class);
-        PendingIntent pi = PendingIntent.getActivity(this, 0, open,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        boolean on = notificationsOn(this);
-        return new Notification.Builder(this, on ? CHANNEL : CHANNEL_QUIET)
-                .setSmallIcon(R.drawable.ic_stat_thermo)
-                .setContentTitle(on ? "BYD температура" : "BYD Temp")
-                .setOnlyAlertOnce(true)
-                .setContentText(text)
-                .setContentIntent(pi)
-                .setOngoing(true)
-                .build();
+    private void refreshOverlay() {
+        mainHandler.post(overlay::refresh);
     }
 
     @Override
     public void onDestroy() {
-        if (handler != null) handler.removeCallbacksAndMessages(null);
-        if (overlay != null) overlay.hide();
-        if (adb != null) adb.close();
-        if (thread != null) thread.quitSafely();
+        workerHandler.removeCallbacksAndMessages(null);
+        overlay.hide();
+        carShell.close();
+        worker.quitSafely();
         super.onDestroy();
     }
 

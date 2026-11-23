@@ -11,7 +11,7 @@ import java.lang.reflect.Method;
 /**
  * Entry point started through ADB as the "shell" user:
  *   CLASSPATH=<this apk> app_process /system/bin ua.probe.byd.ShellMain read
- * Prints one line "TEMPS in=.. out=..".
+ * Prints one {@link TempReply} line. {@link CarShell} builds this command.
  */
 public class ShellMain {
 
@@ -27,7 +27,7 @@ public class ShellMain {
         try {
             TempRead.run(new ShellContext(systemContext()));
         } catch (Throwable t) {
-            System.out.println("TEMPS error=" + t);
+            System.out.println(TempReply.formatError(t.toString()));
         }
         System.out.flush();
         System.exit(0);

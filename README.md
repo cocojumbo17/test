@@ -27,3 +27,16 @@ GitHub Actions збирає `BydTemp-v<версія>-debug.apk` при кожн�
 - колір тексту;
 - сніжинка біля вуличної температури нижче +5°;
 - системні сповіщення про зміну температури (за замовчуванням вимкнені; фонове сповіщення «BYD Temp працює у фоні» лишається завжди, бо його вимагає Android).
+
+## Будова коду (v1.9)
+
+Залежності йдуть від Android-оболонок усередину, до чистої логіки:
+
+| Шар | Класи | Що робить |
+|---|---|---|
+| Чиста логіка (без Android, з тестами) | `TempReply`, `Reading`, `TemperatureText`, `RetryPolicy` | протокол відповіді, показання, текст «Салон +15° · Вулиця +2° ❄», інтервали повторів |
+| Адаптери | `AppPrefs`, `CarShell`, `TempNotifier` | усі налаштування в одному місці; ADB-шлюз (не кидає винятків); сповіщення |
+| Оболонки Android | `TempService`, `TempOverlay`, `TempWidget`, `MainActivity`, `BootReceiver` | тонкі, лише з'єднують адаптери |
+| Код у машині (shell) | `ShellMain`, `TempRead`, `PermissiveContext` | читає температури від імені shell |
+
+Тести: `app/src/test/java/ua/probe/byd/`, запускаються в GitHub Actions перед збіркою APK (`gradle testDebugUnitTest assembleDebug`). Якщо тест падає, APK не збирається.

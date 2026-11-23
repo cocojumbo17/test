@@ -8,6 +8,6 @@ import android.content.Intent;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
-        TempWidget.startService(ctx);
+        TempService.start(ctx);
     }
 }

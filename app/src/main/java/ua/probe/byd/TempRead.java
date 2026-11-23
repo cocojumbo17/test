@@ -6,9 +6,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /**
- * Runs as the shell user (via ShellMain "read") and prints one line:
- *   TEMPS in=<cabin °C> out=<outside °C>
- * Read-only: uses the AC device's protected get(deviceType, featureId).
+ * Runs as the shell user (via {@link ShellMain}) and prints one {@link TempReply} line.
+ * Read-only: uses the AC device's protected get(deviceType, featureId),
+ * which BYD's public API does not expose.
  */
 public class TempRead {
 
@@ -17,7 +17,7 @@ public class TempRead {
     static final int FALLBACK_TEMP_INSIDE = 1031798832;
     static final int FALLBACK_TEMP_OUT = 1077936184;
 
-    public static void run(Context ctx) {
+    static void run(Context ctx) {
         try {
             Class<?> acCls = Class.forName("android.hardware.bydauto.ac.BYDAutoAcDevice");
             Object ac = acCls.getMethod("getInstance", Context.class).invoke(null, new PermissiveContext(ctx));
@@ -29,10 +29,10 @@ public class TempRead {
             int outId = featureId("AC_TEMP_OUT", FALLBACK_TEMP_OUT);
             Object in = get.invoke(ac, AC_DEVICE_TYPE, inId);
             Object out = get.invoke(ac, AC_DEVICE_TYPE, outId);
-            System.out.println("TEMPS in=" + in + " out=" + out);
+            System.out.println(TempReply.formatValues(in, out));
         } catch (Throwable t) {
             while (t.getCause() != null) t = t.getCause();
-            System.out.println("TEMPS error=" + t.getClass().getSimpleName() + ": " + t.getMessage());
+            System.out.println(TempReply.formatError(t.getClass().getSimpleName() + ": " + t.getMessage()));
         }
     }
 

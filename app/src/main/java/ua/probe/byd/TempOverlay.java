@@ -1,7 +1,6 @@
 package ua.probe.byd;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.provider.Settings;
@@ -13,163 +12,150 @@ import android.view.WindowManager;
 import android.widget.TextView;
 
 /**
- * Floating label over all apps: "Салон +15° · Вулиця +2° ❄".
+ * Floating label over all apps: "Салон +15°  ·  Вулиця +2° ❄".
  * Drag to move (kept inside the screen; the status-bar strip is allowed), tap to refresh.
- * Background opacity and text colour come from settings. Main thread only.
+ * Style comes from {@link AppPrefs}. Main thread only.
  */
-public class TempOverlay {
+final class TempOverlay {
 
-    static final int DEFAULT_BG_ALPHA = 204;          // 80 %
-    static final int DEFAULT_TEXT_COLOR = 0xFFFFFFFF;  // white
-    private static final int BG_RGB = 0x1E2329;
-    static final int MIN_TEXT_SIZE = 14, MAX_TEXT_SIZE = 40, DEFAULT_TEXT_SIZE = 22;
+    private static final int BACKGROUND_RGB = 0x1E2329;
+    private static final int DEFAULT_X = 40;
+    private static final int DEFAULT_Y = 120;
+    // Padding and corners grow with the font so the label keeps its proportions.
+    private static final float PADDING_H_PER_SP = 1.3f;
+    private static final float PADDING_V_PER_SP = 0.65f;
+    private static final float CORNER_PER_SP = 1.6f;
 
     private final Context ctx;
     private final Runnable onTap;
-    private WindowManager wm;
-    private TextView view;
-    private WindowManager.LayoutParams lp;
-    private GradientDrawable bg;
+    private WindowManager windowManager;
+    private TextView label;
+    private WindowManager.LayoutParams params;
+    private GradientDrawable background;
 
-    public TempOverlay(Context ctx, Runnable onTap) {
+    TempOverlay(Context ctx, Runnable onTap) {
         this.ctx = ctx;
         this.onTap = onTap;
     }
 
-    private static SharedPreferences prefs(Context ctx) {
-        return ctx.getSharedPreferences(TempService.PREFS, Context.MODE_PRIVATE);
-    }
-
-    static boolean enabled(Context ctx) { return prefs(ctx).getBoolean("overlay", true); }
-
-    static void setEnabled(Context ctx, boolean on) { prefs(ctx).edit().putBoolean("overlay", on).apply(); }
-
-    static int bgAlpha(Context ctx) { return prefs(ctx).getInt("bg_alpha", DEFAULT_BG_ALPHA); }
-
-    static int textColor(Context ctx) { return prefs(ctx).getInt("text_color", DEFAULT_TEXT_COLOR); }
-
-    static int textSize(Context ctx) {
-        int sp = prefs(ctx).getInt("text_size", DEFAULT_TEXT_SIZE);
-        return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, sp));
-    }
-
-    /** Asks for the label to be centred the next time it is shown or refreshed. */
-    static void requestCenter(Context ctx) { prefs(ctx).edit().putInt("ox", -1).putInt("oy", -1).apply(); }
-
-    /** Shows, updates or hides the label according to settings and permission. */
-    public void refresh() {
-        if (!enabled(ctx) || !Settings.canDrawOverlays(ctx)) {
+    /** Shows, updates or hides the label according to the settings and the permission. */
+    void refresh() {
+        AppPrefs prefs = AppPrefs.of(ctx);
+        if (!prefs.overlayEnabled() || !Settings.canDrawOverlays(ctx)) {
             hide();
             return;
         }
-        if (view == null) show();
-        if (view == null) return;
-        view.setText(TempWidget.summary(ctx));
-        applyStyle();
-        if (prefs(ctx).getInt("ox", 0) < 0) view.post(this::center);
+        if (label == null) show(prefs);
+        if (label == null) return;
+        label.setText(prefs.currentSummary());
+        applyStyle(prefs);
+        if (prefs.isOverlayCenterRequested()) label.post(this::moveToCenter);
     }
 
-    public void applyStyle() {
-        if (view == null) return;
-        view.setTextColor(textColor(ctx));
-        int sp = textSize(ctx);
-        view.setTextSize(sp);
-        // padding and corners grow with the font so the label keeps its proportions
-        int padH = Math.round(sp * 1.3f), padV = Math.round(sp * 0.65f);
-        view.setPadding(padH, padV, padH, padV);
-        bg.setCornerRadius(sp * 1.6f);
-        bg.setColor((bgAlpha(ctx) << 24) | BG_RGB);
-        view.setBackground(bg);
-        view.post(this::update);
+    void hide() {
+        if (label != null) {
+            try { windowManager.removeView(label); } catch (Exception ignored) { }
+        }
+        label = null;
     }
 
-    /** Puts the label in the middle of the screen and remembers that position. */
-    public void center() {
-        if (view == null) return;
-        int[] s = screen();
-        lp.x = Math.max(0, (s[0] - view.getWidth()) / 2);
-        lp.y = Math.max(0, (s[1] - view.getHeight()) / 2);
-        update();
-        save();
-    }
-
-    private void show() {
+    private void show(AppPrefs prefs) {
         try {
-            wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
-            view = new TextView(ctx);
-            bg = new GradientDrawable();
-
-            SharedPreferences p = prefs(ctx);
-            lp = new WindowManager.LayoutParams(
+            windowManager = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+            label = new TextView(ctx);
+            background = new GradientDrawable();
+            params = new WindowManager.LayoutParams(
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    // LAYOUT_IN_SCREEN: coordinates are from the very top, so the status-bar strip is reachable
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    // LAYOUT_IN_SCREEN: coordinates start at the very top, so the status-bar strip is reachable
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSLUCENT);
-            lp.gravity = Gravity.TOP | Gravity.START;
-            lp.x = Math.max(0, p.getInt("ox", 40));
-            lp.y = Math.max(0, p.getInt("oy", 120));
-
-            view.setOnTouchListener(new View.OnTouchListener() {
-                float downX, downY;
-                int startX, startY;
-                boolean moved;
-
-                @Override
-                public boolean onTouch(View v, MotionEvent e) {
-                    switch (e.getAction()) {
-                        case MotionEvent.ACTION_DOWN:
-                            downX = e.getRawX(); downY = e.getRawY();
-                            startX = lp.x; startY = lp.y; moved = false;
-                            return true;
-                        case MotionEvent.ACTION_MOVE:
-                            int dx = (int) (e.getRawX() - downX), dy = (int) (e.getRawY() - downY);
-                            if (Math.abs(dx) > 12 || Math.abs(dy) > 12) moved = true;
-                            lp.x = startX + dx; lp.y = startY + dy;
-                            update();
-                            return true;
-                        case MotionEvent.ACTION_UP:
-                            if (moved) save();
-                            else if (onTap != null) onTap.run();
-                            return true;
-                    }
-                    return false;
-                }
-            });
-            applyStyle();
-            wm.addView(view, lp);
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.x = prefs.overlayX(DEFAULT_X);
+            params.y = prefs.overlayY(DEFAULT_Y);
+            label.setOnTouchListener(new DragOrTap());
+            applyStyle(prefs);
+            windowManager.addView(label, params);
         } catch (Exception e) {
-            view = null;
+            label = null;
         }
     }
 
-    /** Clamps the label inside the screen and applies the position. */
-    private void update() {
-        int[] s = screen();
-        int w = view.getWidth(), h = view.getHeight();
-        lp.x = Math.max(0, Math.min(lp.x, s[0] - w));
-        lp.y = Math.max(0, Math.min(lp.y, s[1] - h));
-        try { wm.updateViewLayout(view, lp); } catch (Exception ignored) { }
+    private void applyStyle(AppPrefs prefs) {
+        int sp = prefs.textSize();
+        label.setTextSize(sp);
+        label.setTextColor(prefs.textColor());
+        int horizontal = Math.round(sp * PADDING_H_PER_SP);
+        int vertical = Math.round(sp * PADDING_V_PER_SP);
+        label.setPadding(horizontal, vertical, horizontal, vertical);
+        background.setCornerRadius(sp * CORNER_PER_SP);
+        background.setColor((prefs.backgroundAlpha() << 24) | BACKGROUND_RGB);
+        label.setBackground(background);
+        label.post(this::keepInsideScreen);   // a bigger font may push the label past the edge
     }
 
-    private void save() {
-        prefs(ctx).edit().putInt("ox", lp.x).putInt("oy", lp.y).apply();
+    private void moveToCenter() {
+        if (label == null) return;
+        int[] screen = screenSize();
+        params.x = (screen[0] - label.getWidth()) / 2;
+        params.y = (screen[1] - label.getHeight()) / 2;
+        keepInsideScreen();
+        savePosition();
+    }
+
+    private void keepInsideScreen() {
+        if (label == null) return;
+        int[] screen = screenSize();
+        params.x = Math.max(0, Math.min(params.x, screen[0] - label.getWidth()));
+        params.y = Math.max(0, Math.min(params.y, screen[1] - label.getHeight()));
+        try { windowManager.updateViewLayout(label, params); } catch (Exception ignored) { }
+    }
+
+    private void savePosition() {
+        AppPrefs.of(ctx).saveOverlayPosition(params.x, params.y);
     }
 
     /** Full physical size of the main screen, status bar included. */
     @SuppressWarnings("deprecation")
-    private int[] screen() {
-        DisplayMetrics dm = new DisplayMetrics();
-        wm.getDefaultDisplay().getRealMetrics(dm);
-        return new int[]{dm.widthPixels, dm.heightPixels};
+    private int[] screenSize() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        windowManager.getDefaultDisplay().getRealMetrics(metrics);
+        return new int[]{metrics.widthPixels, metrics.heightPixels};
     }
 
-    public void hide() {
-        if (view != null && wm != null) {
-            try { wm.removeView(view); } catch (Exception ignored) { }
+    /** A short touch is a tap (refresh); moving the finger further drags the label. */
+    private final class DragOrTap implements View.OnTouchListener {
+        private static final int TAP_SLOP_PX = 12;
+        private float downX, downY;
+        private int startX, startY;
+        private boolean dragging;
+
+        @Override
+        public boolean onTouch(View v, MotionEvent e) {
+            switch (e.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getRawX();
+                    downY = e.getRawY();
+                    startX = params.x;
+                    startY = params.y;
+                    dragging = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    int dx = (int) (e.getRawX() - downX);
+                    int dy = (int) (e.getRawY() - downY);
+                    if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) dragging = true;
+                    params.x = startX + dx;
+                    params.y = startY + dy;
+                    keepInsideScreen();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (dragging) savePosition();
+                    else onTap.run();
+                    return true;
+                default:
+                    return false;
+            }
         }
-        view = null;
     }
 }

@@ -3,8 +3,8 @@ plugins {
 }
 
 // Change the version here only: it goes into the app and into the APK file name.
-def appVersionName = '1.8'
-def appVersionCode = 18
+def appVersionName = '1.9'
+def appVersionCode = 19
 
 base {
     archivesName = "BydTemp-v${appVersionName}"
@@ -49,4 +49,8 @@ android {
         abortOnError false
         checkReleaseBuilds false
     }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
 }
